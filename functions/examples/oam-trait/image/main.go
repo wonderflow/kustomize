@@ -23,13 +23,12 @@ func main() {
 		fmt.Fprint(os.Stderr, err)
 		os.Exit(1)
 	}
+	return
 }
 
 // filter implements kio.Filter
 type filter struct{}
 
-// Filter injects cpu and memory resource reservations into containers for
-// Resources containing the `tshirt-size` annotation.
 func (filter) Filter(in []*yaml.RNode) ([]*yaml.RNode, error) {
 	// inject the resource reservations into each Resource
 	for _, r := range in {
@@ -40,8 +39,6 @@ func (filter) Filter(in []*yaml.RNode) ([]*yaml.RNode, error) {
 	return in, nil
 }
 
-// inject sets the cpu and memory reservations on all containers for Resources annotated
-// with `tshirt-size: small|medium|large`
 func inject(r *yaml.RNode) error {
 	// lookup the components field
 	components, err := r.Pipe(yaml.Lookup("spec", "components"))
@@ -54,19 +51,17 @@ func inject(r *yaml.RNode) error {
 		fmt.Println("no components")
 		return nil
 	}
-
-	// check for the tshirt-size annotations
+	// check annotations
 	meta, err := r.GetMeta()
 	if err != nil {
-		return err
+		return fmt.Errorf("get meta error, %v", err)
 	}
+
 	var replicaNumber string
 	if number, found := meta.Annotations["scaler"]; !found {
-		// not a tshirt-sized Resource, ignore it
 		fmt.Println("no scaler annotation")
 		return nil
 	} else {
-		// lookup the memory and cpu quantities based on the tshirt size
 		replicaNumber = number
 	}
 	err = components.VisitElements(func(node *yaml.RNode) error {
@@ -77,14 +72,7 @@ func inject(r *yaml.RNode) error {
 		}
 		var changed = false
 		traits.VisitElements(func(node *yaml.RNode) error {
-			/*
-				apiVersion: core.oam.dev/v1alpha2
-				kind: ManualScalerTrait
-				metadata:
-				  name:  example-appconfig-trait
-				spec:
-				  replicaCount: 3
-			*/
+
 			trait, err := node.Pipe(yaml.Lookup("trait"))
 			if err != nil {
 				s, _ := r.String()
@@ -97,7 +85,7 @@ func inject(r *yaml.RNode) error {
 				err := trait.PipeE(
 					// lookup resources.requests.cpu, creating the field as a
 					// ScalarNode if it doesn't exist
-					yaml.LookupCreate(yaml.ScalarNode, "spec", "replicaCount"),
+					yaml.Lookup("spec", "replicaCount"),
 					// set the field value to the cpuSize
 					yaml.Set(yaml.NewScalarRNode(replicaNumber)))
 				if err != nil {
@@ -111,7 +99,6 @@ func inject(r *yaml.RNode) error {
 		if changed {
 			fmt.Println("changed")
 		}
-		traits.PipeE()
 		return nil
 	})
 	return nil
